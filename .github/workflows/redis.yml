@@ -228,6 +228,77 @@ jobs:
      GPG_KEY: ${{ secrets.GPG_KEY }}
      GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
 
+ x86_64_amazonlinux2:
+  name: Amazonlinux2 (x86_64)
+  runs-on: ubuntu-latest
+  needs: [ x86_64-rhel7 ]
+  strategy:
+    matrix:
+      package: ['redis-stack-server']  # add the matrix back if multiple packages are a thing again
+  env:
+    arch: x86_64
+    platform: rhel7
+    testplatform: amazonlinux2
+    osnick: rhel7
+    osname: Linux
+    target: rpm
+    pythonversion: "3.10"
+  steps:
+
+   - name: checkout sources
+     uses: actions/checkout@v2
+   - name: Cache dependencies
+     uses: actions/cache@v2
+     with:
+       path: |
+         /var/cache/apt
+         /var/cache/yum
+         ~/.cache/pip
+         ~/.cache/pypoetry
+         ~/.local/share/gem
+       key: pypoetry-${{hashFiles('pyproject.toml', '.github/workflows/*.yml')}}-${{env.platform}}-${{env.arch}}-package
+   - name: install python
+     uses: actions/setup-python@v3
+     with:
+       python-version: "${{env.pythonversion}}"
+   - name: install poetry
+     uses: snok/install-poetry@v1
+     with:
+       version: latest
+       virtualenvs-in-project: true
+       virtualenvs-create: true
+       installer-parallel: true
+
+   - name: install packaging and testing tools
+     run: |
+       poetry install
+
+   - uses: actions/download-artifact@v2
+     with:
+       name: redis-stack-server-${{env.platform}}-${{env.arch}}.${{env.target}}
+
+   - uses: actions/download-artifact@v2
+     with:
+       name: redis-stack-server-${{env.platform}}-${{env.arch}}.tar.gz
+
+   - name: run tests in dockers
+     run: |
+       source .venv/bin/activate
+       mkdir redis-stack
+       cp *.tar.gz redis-stack/${{ matrix.package }}.tar.gz
+       cp *.${{ env.target }} redis-stack/${{ matrix.package }}.${{ env.target }}
+       pytest -m "${{env.testplatform}} and not physical and not arm" --junit-xml=results.xml
+
+   - uses: dorny/test-reporter@v1
+     if: success() || failure()
+     with:
+       name: Test Results ${{env.testplatform}} ${{env.osnick}} ${{env.arch}}
+       path: '*.xml'
+       reporter: java-junit
+       list-suites: all
+       list-tests: all
+       max-annotations: 10
+
  x86-64_rhel8:
    uses: ./.github/workflows/BUILD_AND_PACKAGE_REUSABLE.yml
    with:
@@ -368,7 +439,6 @@ jobs:
        invoke package -o ${{env.osname}} -s ${{env.osnick}} -d ${{env.platform}} -a ${{env.arch}} -t zip -p redis-stack-server -k package
 
    - name: codesign all binaries
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
        cd redis-stack
        echo ${{secrets.MACOS_CERTIFICATE}} | base64 --decode > certificate.p12
@@ -404,7 +474,6 @@ jobs:
        zip -r notarized-${{env.platform}}-${{env.arch}}.zip bin lib
 
    - name: notarize the custom zip
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
        cd redis-stack/build/${{env.osname}}-${{env.osnick}}-${{env.arch}}.redis-stack-server/opt/redis-stack
        sh ../../../../notarize.sh notarized-${{env.platform}}-${{env.arch}}.zip com.redis.redis-stack-server ${{ secrets.MAC_NOTARIZE_USERNAME }} ${{ secrets.MAC_NOTARIZE_PASSWORD }}
@@ -479,7 +548,6 @@ jobs:
        echo "::set-output name=VERSION::$realversion"
 
    - uses: s3-actions/s3cmd@v1.1
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      with:
        provider: aws
        region: us-east-1
@@ -487,7 +555,6 @@ jobs:
        secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
    - name: persist redis to s3
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
       mkdir s3dist
       cp redis-stack/redis-stack*.${{env.target}} s3dist
@@ -557,7 +624,7 @@ jobs:
 #    - name: build redis from source
 #      run: |
 #        cd redis
-#        make all BUILD_TLS=yes FINAL_LIBS="-lm -ldl ../deps/hiredis/libhiredis_ssl.a /usr/local/opt/openssl/lib/libssl.a /usr/local/opt/openssl/lib/libcrypto.a" CFLAGS="-I /opt/homebrew/opt/openssl@1.1/include"
+#        make all BUILD_TLS=yes FINAL_LIBS="-lm -ldl ../deps/hiredis/libhiredis_ssl.a /opt/homebrew/opt/openssl/lib/libssl.a /opt/homebrew/opt/openssl/lib/libcrypto.a" CFLAGS="-I /opt/homebrew/opt/openssl@3/include"
 #
    - name: collect dependencies prior to packaging
      run: |
@@ -565,7 +632,6 @@ jobs:
        invoke package -o ${{env.osname}} -s ${{env.osnick}} -d ${{env.platform}} -a ${{env.arch}} -t ${{env.target}} -p redis-stack-server -k package
 
    - name: codesign all binaries
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
        echo ${{secrets.MACOS_CERTIFICATE}} | base64 --decode > certificate.p12
        security create-keychain -p ${{ secrets.MACOS_KEYCHAIN_PASSWORD }} build.keychain
@@ -609,20 +675,17 @@ jobs:
          build/${{env.osname}}-${{env.osnick}}-${{env.arch}}.redis-stack-server/opt/redis-stack/*.zip
 
    - name: notarize the custom zip
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
        cd build/${{env.osname}}-${{env.osnick}}-${{env.arch}}.redis-stack-server/opt/redis-stack
        sh ../../../../notarize.sh notarized-${{env.platform}}-${{env.arch}}.zip com.redis.redis-stack-server ${{ secrets.MAC_NOTARIZE_USERNAME }} ${{ secrets.MAC_NOTARIZE_PASSWORD }}
 
    - uses: s3-actions/s3cmd@v1.1
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      with:
        provider: aws
        region: us-east-1
        access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
        secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
    - name: upload snapshots
-     if: steps.iamafork.outputs.IAMAFORK == 'false'
      run: |
        s3cmd put -P *.${{env.target}} s3://redismodules/redis-stack/snapshots/
        s3cmd put -P *.sha256 s3://redismodules/redis-stack/snapshots/
@@ -677,7 +740,6 @@ jobs:
          name: redis-stack-server-${{env.platform}}-${{env.arch}}.${{env.target}}
 
      - name: write the ssh key to a file
-       if: steps.iamafork.outputs.IAMAFORK == 'false'
        run: |
          echo "${{secrets.OPERETO_KEY}}" > ssh.key
          chmod 0400 ssh.key
@@ -689,19 +751,18 @@ jobs:
          source .venv/bin/activate
          realversion=`invoke version`
          echo "::set-output name=VERSION::$realversion"
-     - name: run the tests
-       if: steps.iamafork.outputs.IAMAFORK == 'false'
-       run: |
-         source .venv/bin/activate
-         invoke test-over-ssh -b \
-           redis-stack-server-${{steps.get_version.outputs.VERSION}}.${{env.platform}}.${{env.arch}}.${{env.target}} \
-           -i ${{secrets.M1_IP}} \
-           -m macos \
-           -p redis-stack-server \
-           -s ssh.key \
-           -u ${{secrets.M1_SSH_USER}} \
-           -v `echo $RANDOM` \
-           -g HEAD
+#     - name: run the tests
+#       run: |
+#         source .venv/bin/activate
+#         invoke test-over-ssh -b \
+#           redis-stack-server-${{steps.get_version.outputs.VERSION}}.${{env.platform}}.${{env.arch}}.${{env.target}} \
+#           -i ${{secrets.M1_IP}} \
+#           -m macos \
+#           -p redis-stack-server \
+#           -s ssh.key \
+#           -u ${{secrets.M1_SSH_USER}} \
+#           -v `echo $RANDOM` \
+#           -g HEAD
 
 ###################### COLLATE DOCKERS ##################
  docker-push:
@@ -742,7 +803,6 @@ jobs:
          echo "::set-output name=IAMAFORK::$amfork"
 
      - name: Log in to DockerHub
-       if: steps.iamafork.outputs.IAMAFORK == 'false'
        uses: docker/login-action@v1
        with:
          username: ${{ secrets.DOCKERHUB_REDISFAB_USERNAME }}
@@ -753,6 +813,5 @@ jobs:
            redisfab/${{ matrix.package }}:${{steps.get_version.outputs.VERSION}}-x86_64 \
            redisfab/${{ matrix.package }}:${{steps.get_version.outputs.VERSION}}-arm64
      - name: push the manifest
-       if: steps.iamafork.outputs.IAMAFORK == 'false'
        run: |
          docker manifest push redisfab/${{matrix.package}}:${{steps.get_version.outputs.VERSION}}
