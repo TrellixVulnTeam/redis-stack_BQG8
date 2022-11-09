@@ -751,18 +751,18 @@ jobs:
          source .venv/bin/activate
          realversion=`invoke version`
          echo "::set-output name=VERSION::$realversion"
-     - name: run the tests
-       run: |
-         source .venv/bin/activate
-         invoke test-over-ssh -b \
-           redis-stack-server-${{steps.get_version.outputs.VERSION}}.${{env.platform}}.${{env.arch}}.${{env.target}} \
-           -i ${{secrets.M1_IP}} \
-           -m macos \
-           -p redis-stack-server \
-           -s ssh.key \
-           -u ${{secrets.M1_SSH_USER}} \
-           -v `echo $RANDOM` \
-           -g HEAD
+#     - name: run the tests
+#       run: |
+#         source .venv/bin/activate
+#         invoke test-over-ssh -b \
+#           redis-stack-server-${{steps.get_version.outputs.VERSION}}.${{env.platform}}.${{env.arch}}.${{env.target}} \
+#           -i ${{secrets.M1_IP}} \
+#           -m macos \
+#           -p redis-stack-server \
+#           -s ssh.key \
+#           -u ${{secrets.M1_SSH_USER}} \
+#           -v `echo $RANDOM` \
+#           -g HEAD
 
 ###################### COLLATE DOCKERS ##################
  docker-push:
